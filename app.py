@@ -126,13 +126,13 @@ def create_search_queries(event_details):
     private_preference = event_details.get('private_preference', 'No Preference')
     special_requirements = event_details.get('special_requirements', '')
     event_time = event_details.get('event_time', '')
-    one_day_event = event_details.get('one_day_event', False)
+    one_day_event = True
     
     # Convert dietary restrictions to a comma-separated string
     dietary_text = ', '.join(dietary_list) if isinstance(dietary_list, list) else str(dietary_list)
     
     # Format event duration for clarity
-    event_duration = "One Day Event" if one_day_event else f"Multi-day Event ({event_details.get('start_date', '')} to {event_details.get('end_date', '')})"
+    event_duration = "One Day Event"
     
     # Build the distance portion of the overall query
     distance_query = ""
@@ -149,20 +149,16 @@ def create_search_queries(event_details):
             - Event Name: {event_details.get('event_name', 'Corporate Event')}
             - Event Type: {event_details.get('event_type', 'Meeting')}
             - Venue Category: {event_details.get('venue_type', 'Any')}
-            - Date Range: {event_details.get('start_date', '')} to {event_details.get('end_date', '')}
-            - One Day Event?: {one_day_event}
+            - Date Range: {event_details.get('start_date', '')}
             - Locations: {', '.join(event_details.get('locations', ['New York']))}
-            - Distance Query: {distance_query.strip()}
+            - Distance Preference: {distance_query.strip()}
             - Desired Atmosphere: {atmosphere if atmosphere else 'No specific vibe stated'}
             - Private vs Semi-Private Preference: {private_preference}
             - Exact Attendee Count: {event_details.get('attendees', 30)}
             - Venue Budget: ${event_details.get('venue_budget', 10000)}
-            - Meeting Room Configuration: {event_details.get('meeting_rooms', 'Conference style')}
             - Food & Beverage Needs: {event_details.get('food_beverage', 'Basic Catering')}
             - Dietary Restrictions: {dietary_text if dietary_text else 'N/A'}
-            - Hotel Rooms Needed: {event_details.get('hotel_rooms', 0)}
             - Other Special Requirements: {special_requirements if special_requirements else 'None'}
-            - Attendee Origins: {event_details.get('attendee_origins', 'Mixed/Unknown')}
             - Additional Notes: {event_details.get('notes', 'N/A')}
             - Decision Date: {event_details.get('decision_date', 'N/A')}
             - Event Time: {event_time}
@@ -170,16 +166,6 @@ def create_search_queries(event_details):
             >>> PRIMARY GOAL: Return only those venues that (1) meet capacity and (2) fall within ~5 miles
             of the specified address or neighborhood (if given), while also respecting the budget,
             atmosphere/vibe, and other key factors above.
-        """,
-        
-        "meeting_rooms": f"""
-            PRIORITY: Meeting Space & Layout
-            - MUST accommodate EXACTLY {event_details.get('attendees', 30)} attendees.
-            - Required Room Configuration: {event_details.get('meeting_rooms', 'Multiple breakouts')}
-            - Private/Semi-Private Preference: {private_preference}
-            - Typical A/V Needs (projectors, microphones, etc.)
-            - Emphasize convenience of location: {distance_query.strip()}
-            - This is the PRIMARY focus of our venue search.
         """,
         
         "food": f"""
@@ -200,7 +186,6 @@ def create_search_queries(event_details):
             - Easy transportation access for {event_details.get('attendees', 30)} attendees
             - {f'Private/Semi-Private Space: {private_preference}' if private_preference != 'No Preference' else ''}
             - Suitable for {event_details.get('event_type', 'business')} events
-            - Close to hotels/accommodations if needed: {event_details.get('hotel_rooms', 0)} rooms
             - This is a CRITICAL factor in our venue selection.
         """,
         
@@ -223,7 +208,6 @@ def create_search_queries(event_details):
             - Budget needs to cover:
               - Venue rental for {event_duration}
               - Food & beverage: {event_details.get('food_beverage', 'Basic Catering')}
-              - Meeting space: {event_details.get('meeting_rooms', 'Conference style')}
               - Any technical requirements: {special_requirements if special_requirements else 'Standard A/V'}
         """
     }
@@ -263,7 +247,7 @@ def find_top_matches(df, event_details, use_specialized_criteria=True):
                 similarities.sort(key=lambda x: x[1], reverse=True)
                 
                 # Get top matches for this criterion (more for overall, fewer for specialized criteria)
-                num_matches = 25 if criterion == "overall" else 5
+                num_matches = 20 if criterion == "overall" else 5
                 
                 # Add diversity to selection - don't pick same venue for multiple criteria if possible
                 seen_venues = set()
@@ -377,7 +361,6 @@ def get_top_restaurants(top_matches, event_details):
         Type: {event_details.get('event_type', 'Meeting')}
         Attendees: {event_details.get('attendees', 30)}
         Budget: ${event_details.get('venue_budget', 10000)}
-        Meeting Configuration: {event_details.get('meeting_rooms', 'Conference style')}
         Food & Beverage: {event_details.get('food_beverage', 'Basic Catering')}
         Locations: {', '.join(event_details.get('locations', ['New York']))}
         """
@@ -492,7 +475,6 @@ def get_top_restaurants(top_matches, event_details):
                 "event_type": event_details.get('event_type', 'Meeting'),
                 "attendees": event_details.get('attendees', 30),
                 "budget": event_details.get('venue_budget', 10000),
-                "meeting_config": event_details.get('meeting_rooms', 'Conference style'),
                 "food_beverage": event_details.get('food_beverage', 'Basic Catering'),
                 "locations": event_details.get('locations', ['New York'])
             }
@@ -523,7 +505,6 @@ def generate_venue_recommendation(venue_data, event_details, venue_index=1):
         Type: {event_details.get('event_type', 'Meeting')}
         Attendees: {event_details.get('attendees', 30)}
         Budget: ${event_details.get('venue_budget', 10000)}
-        Meeting Configuration: {event_details.get('meeting_rooms', 'Conference style')}
         Food & Beverage: {event_details.get('food_beverage', 'Basic Catering')}
         Locations: {', '.join(event_details.get('locations', ['New York']))}
         """
@@ -540,21 +521,20 @@ def generate_venue_recommendation(venue_data, event_details, venue_index=1):
         
         Format your recommendation exactly like this:
         
-        ### {venue_index}. {venue_data['name']}
-        [Brief introduction to the restaurant]
+        ### {venue_data['name']}
+        [Brief introduction to the restaurant (1 sentence, 5-10 words)]
         
         **Why it's perfect for your event:**
-        - [Specific reason with reference to event requirements (1 line)]
-        - [Specific reason with reference to event requirements (1 line)]
+        - [Reason #1 with reference to event requirements and resturant data (1 sentence, 5-10 words)]
+        - [Reason #2 with reference to event requirements and resturant data (1 sentence, 5-10 words)]
 
+        **Meeting Space:** [How it meets meeting room requirements (1 sentence, 5-10 words)]
         
-        **Meeting Space:** [How it meets meeting room requirements (1-2 lines)]
+        **Food & Beverage:** [How it meets food/beverage requirements (1 sentence, 5-10 words)]
         
-        **Food & Beverage:** [How it meets food/beverage requirements (1-2 lines)]
+        **Considerations:** [Any limitations or things to be aware of (1 sentence, 5-10 words)]
         
-        **Considerations:** [Any limitations or things to be aware of (1-2 lines)]
-        
-        **Confidence Score:** [X/10] - [Brief explanation in plain text (6-10)]
+        **Confidence Score:** [X/10] - [Brief explanation in plain text (1 sentence, 5 words)]
         """
         
         detail_response = client.chat.completions.create(
@@ -645,16 +625,12 @@ if __name__ == "__main__":
     # Sample event details for testing
     sample_event = {
         "event_name": "Engineering Team Offsite 2024",
-        "one_day_event": False,
         "venue_type": "Unique Venue",
         "start_date": "03/01/2025",
         "event_type": "Team Building",
-        "end_date": "03/01/2025",
         "locations": ["New York"],
         "venue_budget": 10000,
         "attendees": 80,
-        "hotel_rooms": 20,
-        "meeting_rooms": "80 pax classroom, 5 breakouts 20 pax",
         "food_beverage": "indian cuisine preferred",
         "decision_date": "03/01/2025",
         "notes": "Date flexibility, open to sharing rooms"
