@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 import pandas as pd
 import urllib.parse
+import time
 
 # Import backend functions
 from app import find_best_restaurants, get_venue_recommendation
@@ -161,6 +162,37 @@ st.markdown("""
     .map-container a:hover {
         text-decoration: underline;
     }
+    
+    /* Time picker styling */
+    .time-picker {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 10px;
+        margin-bottom: 15px;
+    }
+    .time-picker-label {
+        font-weight: 600;
+        margin-bottom: 5px;
+    }
+    .time-picker-selects {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    /* Tips section in sidebar */
+    .tips-section h3 {
+        color: #3b82f6;
+        font-size: 1.2rem;
+        margin: 20px 0 10px 0;
+    }
+    .tips-section ul {
+        padding-left: 20px;
+    }
+    .tips-section li {
+        margin-bottom: 5px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -181,14 +213,35 @@ if 'emails_sent' not in st.session_state:
     st.session_state.emails_sent = {}
 if 'venue_recommendations' not in st.session_state:
     st.session_state.venue_recommendations = {}
+if 'loading_recommendations' not in st.session_state:
+    st.session_state.loading_recommendations = set()
+if 'progress_tracking' not in st.session_state:
+    st.session_state.progress_tracking = {
+        'recommendation_progress': 0,
+        'email_progress': {'total': 0, 'current': 0}
+    }
+if 'shortlist_submitted' not in st.session_state:
+    st.session_state.shortlist_submitted = False
 
 # Function to change page
 def change_page(page_name):
     st.session_state.page = page_name
+    # Scroll to top when changing pages
+    js = '''
+    <script>
+        window.parent.scrollTo(0, 0);
+    </script>
+    '''
+    st.markdown(js, unsafe_allow_html=True)
 
 # Callback functions to handle state changes
 def handle_search_submit():
     st.session_state.search_submitted = True
+
+def handle_shortlist_submit():
+    st.session_state.shortlist_submitted = True
+    # Change page and ensure we start at the top
+    change_page('shortlist')
 
 def toggle_venue_selection(venue, selected):
     """Handle venue selection/deselection with a maximum of 5 selections"""
@@ -204,8 +257,6 @@ def toggle_venue_selection(venue, selected):
             v for v in st.session_state.selected_venues 
             if v.get('name') != venue.get('name')
         ]
-    
-    # Important: Don't trigger a new search when toggling selection
 
 # Function to load restaurant data for contact info
 @st.cache_data
@@ -225,6 +276,181 @@ def reset_search():
     st.session_state.selected_venues = []
     st.session_state.emails_sent = {}
     st.session_state.venue_recommendations = {}
+    st.session_state.loading_recommendations = set()
+    st.session_state.progress_tracking = {
+        'recommendation_progress': 0,
+        'email_progress': {'total': 0, 'current': 0}
+    }
+    st.session_state.shortlist_submitted = False
+
+# Cache UI components
+@st.cache_data(ttl=3600)
+def get_sidebar_components():
+    return {
+        "sidebar_help": """
+        <div class="tips-section">
+            <h3>Enhanced AI Venue Finder</h3>
+            <ol>
+                <li><strong>Analyze Requirements</strong>: AI analyzes your event needs</li>
+                <li><strong>Recommend Venues</strong>: Get detailed venue recommendations</li>
+                <li><strong>Contact Venues</strong>: Reach out to selected venues directly</li>
+            </ol>
+            
+            <h3>Tips</h3>
+            <ul>
+                <li>Be specific about your requirements</li>
+                <li>Select up to 5 venues to contact</li>
+                <li>Review venue details before sending inquiries</li>
+            </ul>
+        </div>
+        """,
+        "sidebar_contact": """
+        <div style="padding: 10px 0;">
+            <p>Contact our event specialists:</p>
+            <p>📧 <a href="mailto:support@venuefinder.com">support@venuefinder.com</a></p>
+            <p>📱 (555) 123-4567</p>
+        </div>
+        """
+    }
+
+@st.cache_data
+def render_venue_card(venue_name, venue_address, venue_cuisine, venue_pricing, score, selected=False):
+    """Cached venue card rendering"""
+    # Normalize score
+    display_score = round(score * 10, 1) if score <= 1 else round(score, 1)
+    
+    # Add selected class if venue is selected
+    card_class = "venue-card selected-venue" if selected else "venue-card"
+    
+    return f"""
+    <div class="{card_class}">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>{venue_name}</h3>
+            <span class="score-badge">{display_score}/10 Match</span>
+        </div>
+        <p>
+        📍 {venue_address} | 
+        🍽️ {venue_cuisine} | 
+        💰 {venue_pricing}
+        </p>
+    </div>
+    """
+
+def load_recommendations(event_details):
+    """Load recommendations with progress indicator"""
+    progress_placeholder = st.empty()
+    status_text = st.empty()
+    
+    with progress_placeholder.container():
+        progress_bar = st.progress(0)
+        
+        # Simulated progress before actual API call
+        for i in range(5):
+            progress = int((i + 1) / 15 * 100)
+            progress_bar.progress(progress)
+            status_text.text(f"Analyzing event requirements ({i+1}/5)...")
+            time.sleep(0.3)
+        
+        for i in range(5, 15):
+            progress = int((i + 1) / 15 * 100)
+            progress_bar.progress(progress)
+            status_text.text(f"Finding venue match {i-4}/10...")
+            time.sleep(0.2)
+        
+        # Actual API call
+        stage1_results = find_best_restaurants(event_details)
+        
+        # Complete the progress
+        progress_bar.progress(100)
+        status_text.text("Recommendations complete!")
+        time.sleep(0.5)
+    
+    # Clear the progress indicators when done
+    progress_placeholder.empty()
+    status_text.empty()
+    
+    return stage1_results
+
+def send_all_emails(venues, contact_details):
+    """Send emails with progress tracking"""
+    total = len(venues)
+    st.session_state.progress_tracking['email_progress'] = {'total': total, 'current': 0}
+    
+    progress_container = st.container()
+    
+    with progress_container:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        success_count = 0
+        
+        for idx, venue in enumerate(venues):
+            name = venue.get('name', 'Unnamed Venue')
+            status_text.text(f"Sending inquiry to {name}...")
+            
+            # Add venue name to contact details for subject line
+            venue_contact_details = contact_details.copy()
+            venue_contact_details["venue_name"] = name
+            
+            # Update progress
+            current = idx + 1
+            progress = int(current / total * 100)
+            progress_bar.progress(progress)
+            st.session_state.progress_tracking['email_progress']['current'] = current
+            
+            # Use test email for all venues
+            venue_email = "abhikatoldtrafford@gmail.com"
+            
+            try:
+                result = send_venue_request(
+                    "credentials.json", 
+                    venue_email,
+                    venue_contact_details,
+                    st.secrets.get("OPENAI_API_KEY", None)
+                )
+                
+                if result.get("status") == "sent":
+                    st.session_state.emails_sent[name] = True
+                    success_count += 1
+                    time.sleep(0.5)  # Small delay for visual feedback
+                else:
+                    st.error(f"Failed to send to {name}: {result.get('message')}")
+            except Exception as e:
+                st.error(f"Error sending to {name}: {str(e)}")
+    
+        # Show completion message
+        if success_count > 0:
+            status_text.success(f"Successfully sent {success_count} inquiries!")
+        else:
+            status_text.error("Failed to send any inquiries. Please try again.")
+        
+        time.sleep(2)  # Show the message briefly
+    
+    return success_count
+
+def create_time_picker(label, key_prefix):
+    """Create a custom time picker with hour, minute and period selectors"""
+    st.markdown(f"<div class='time-picker-label'>{label}</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        hour = st.selectbox("Hour", list(range(1, 13)), key=f"{key_prefix}_hour")
+    with col2:
+        minute = st.selectbox("Minute", ["00", "15", "30", "45"], key=f"{key_prefix}_minute")
+    with col3:
+        period = st.selectbox("AM/PM", ["AM", "PM"], key=f"{key_prefix}_period")
+    
+    # Convert to 24-hour format for internal use
+    hour_24 = hour if period == "AM" and hour != 12 else hour + 12 if period == "PM" and hour != 12 else 0 if period == "AM" and hour == 12 else 12
+    
+    # Format for display (12-hour format)
+    formatted_time = f"{hour}:{minute} {period}"
+    
+    # Format for database (24-hour format)
+    military_time = f"{hour_24:02d}:{minute}"
+    
+    return formatted_time, military_time
 
 def search_page():
     st.title("🍽️ Venue Finder")
@@ -238,14 +464,22 @@ def search_page():
         col1, col2 = st.columns(2)
         with col1:
             venue_type = st.selectbox("Venue Type *", 
-                ["Select a venue type", "Resturants", "Bars (coming soon)", "Event Spaces (Coming Soon)"])
+                ["Select a venue type", "Restaurants", "Bars (coming soon)", "Event Spaces (Coming Soon)"])
             
         with col2:
             event_type = st.selectbox("Event Type *", 
                 ["Select an event type", "Breakfast", "Lunch", "Dinner", "Happy Hour (coming soon)", "Experience (coming soon)"])
         start_date = st.date_input("Event Date *")
-        event_time = st.time_input("Event Start Time *")
-        event_endtime = st.time_input("Event End Time *")
+        
+        # Improved time picker
+        st.markdown("### Event Time")
+        time_col1, time_col2 = st.columns(2)
+        
+        with time_col1:
+            display_start_time, event_time = create_time_picker("Start Time", "start")
+            
+        with time_col2:
+            display_end_time, event_endtime = create_time_picker("End Time", "end")
         
         # Location and Proximity
         st.markdown("### Location Details")
@@ -331,8 +565,10 @@ def search_page():
                 "venue_type": venue_type,
                 "start_date": start_date.strftime("%m/%d/%Y"),
                 "event_type": event_type,
-                "event_time": event_time.strftime("%H:%M"),
-                "event_endtime": event_endtime.strftime("%H:%M"),
+                "event_time": event_time,
+                "event_endtime": event_endtime,
+                "display_start_time": display_start_time,
+                "display_end_time": display_end_time,
                 "locations": locations,
                 "venue_budget": venue_budget,
                 "attendees": attendees,
@@ -349,12 +585,13 @@ def search_page():
 
     # Process search after form is submitted (outside the form)
     if st.session_state.search_submitted and len(st.session_state.recommended_venues) == 0:
-        with st.spinner("Finding perfect venues..."):
+        # Show spinner while loading recommendations
+        with st.spinner("Finding perfect venues for your event..."):
             # Get event details from session state
             event_details = st.session_state.event_details
             
-            # Call venue finder API
-            stage1_results = find_best_restaurants(event_details)
+            # Use improved loading function with progress bar
+            stage1_results = load_recommendations(event_details)
             
             # Store results in session state
             if stage1_results and "top_restaurants" in stage1_results:
@@ -400,39 +637,33 @@ def search_page():
                     address = venue.get('address', 'Address not available')
                     cuisine = venue.get('cuisine', 'Various Cuisine')
                     pricing = venue.get('pricing', 'Not specified')
-                    
-                    # Normalize score
                     score = venue.get('score', 0)
-                    display_score = round(score * 10, 1) if score <= 1 else round(score, 1)
                     
-                    # Add selected class if venue is selected
-                    card_class = "venue-card selected-venue" if selected else "venue-card"
-                    
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <h3>{name}</h3>
-                            <span class="score-badge">{display_score}/10 Match</span>
-                        </div>
-                        <p>
-                        📍 {address} | 
-                        🍽️ {cuisine} | 
-                        💰 {pricing}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    # Use cached venue card renderer
+                    card_html = render_venue_card(name, address, cuisine, pricing, score, selected)
+                    st.markdown(card_html, unsafe_allow_html=True)
                     
                     # Expandable section for detailed recommendation
                     with st.expander(f"Detailed Recommendation for {name}"):
                         # Use a unique key for the recommendation based on venue name
                         rec_key = f"rec_{venue_name}_{idx}"
                         
-                        # Check if we already have this recommendation cached
-                        if rec_key not in st.session_state.venue_recommendations:
-                            with st.spinner("Generating personalized recommendation..."):
-                                # Get the recommendation and cache it
-                                recommendation = get_venue_recommendation(venue, st.session_state.event_details, idx)
-                                st.session_state.venue_recommendations[rec_key] = recommendation
+                        # Check if recommendation is being loaded
+                        if rec_key in st.session_state.loading_recommendations:
+                            st.write("Loading recommendation...")
+                            progress_bar = st.progress(0)
+                            for i in range(100):
+                                time.sleep(0.01)
+                                progress_bar.progress(i + 1)
+                            # After progress completes, set loading to False and fetch the recommendation
+                            st.session_state.loading_recommendations.remove(rec_key)
+                            recommendation = get_venue_recommendation(venue, st.session_state.event_details, idx)
+                            st.session_state.venue_recommendations[rec_key] = recommendation
+                        
+                        # Check if recommendation exists, otherwise start loading
+                        elif rec_key not in st.session_state.venue_recommendations:
+                            st.session_state.loading_recommendations.add(rec_key)
+                            st.rerun()
                         
                         # Display the cached recommendation
                         st.write(st.session_state.venue_recommendations[rec_key])
@@ -449,7 +680,7 @@ def search_page():
                 st.success(f"You've selected {selected_count} venue(s)")
                 st.button("Form Shortlist ➡️", type="primary", key="form_shortlist", 
                           help="Continue to the next step with your selected venues",
-                          on_click=lambda: change_page('shortlist'))
+                          on_click=handle_shortlist_submit)
             else:
                 st.info("Select at least one venue to form a shortlist")
         
@@ -466,33 +697,12 @@ def search_page():
     # Sidebar with help and information
     with st.sidebar:
         st.header("🤔 How It Works")
-        st.markdown("""
-        <div style="padding: 10px 0;">
-            <h3 style="color: #3b82f6; font-size: 1.2rem; margin-bottom: 10px;">Enhanced AI Venue Finder</h3>
-            <ol style="padding-left: 20px;">
-                <li><strong>Analyze Requirements</strong>: AI analyzes your event needs</li>
-                <li><strong>Recommend Venues</strong>: Get detailed venue recommendations</li>
-                <li><strong>Contact Venues</strong>: Reach out to selected venues directly</li>
-            </ol>
-            
-            <h3 style="color: #3b82f6; font-size: 1.2rem; margin: 20px 0 10px 0;">Tips</h3>
-            <ul style="padding-left: 20px;">
-                <li>Be specific about your requirements</li>
-                <li>Select up to 5 venues to contact</li>
-                <li>Review venue details before sending inquiries</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
+        sidebar_components = get_sidebar_components()
+        st.markdown(sidebar_components["sidebar_help"], unsafe_allow_html=True)
 
         st.divider()
         st.header("📞 Need Help?")
-        st.markdown("""
-        <div style="padding: 10px 0;">
-            <p>Contact our event specialists:</p>
-            <p>📧 <a href="mailto:support@venuefinder.com">support@venuefinder.com</a></p>
-            <p>📱 (555) 123-4567</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(sidebar_components["sidebar_contact"], unsafe_allow_html=True)
 
 def shortlist_page():
     st.title("🍽️ Your Venue Shortlist")
@@ -633,8 +843,14 @@ def shortlist_page():
                     contact_details["user_name"] = user_name
                     contact_details["user_phone"] = user_phone
                     contact_details["user_company"] = user_company
+                    contact_details["venue_name"] = name  # Add venue name for email subject
                     
                     with st.spinner(f"Sending inquiry to {name}..."):
+                        progress_bar = st.progress(0)
+                        for i in range(100):
+                            time.sleep(0.01)
+                            progress_bar.progress(i + 1)
+                        
                         try:
                             # Use email.py to send inquiry
                             result = send_venue_request(
@@ -670,39 +886,16 @@ def shortlist_page():
         contact_details["user_phone"] = user_phone
         contact_details["user_company"] = user_company
         
-        success_count = 0
+        # Get list of venues that haven't been sent emails yet
+        venues_to_email = [v for v in selected_venues if not st.session_state.emails_sent.get(v.get('name'), False)]
         
-        for venue in selected_venues:
-            name = venue.get('name', 'Unnamed Venue')
+        # Show spinner while sending emails
+        with st.spinner(f"Sending inquiries to {len(venues_to_email)} venues..."):
+            # Use improved email sender with progress tracking
+            success_count = send_all_emails(venues_to_email, contact_details)
             
-            # Skip if already sent
-            if st.session_state.emails_sent.get(name, False):
-                continue
-            
-            # Use test email for all venues
-            venue_email = "abhikatoldtrafford@gmail.com"
-            
-            # Send email if we have an address
-            if venue_email:
-                with st.spinner(f"Sending inquiry to {name}..."):
-                    try:
-                        result = send_venue_request(
-                            "credentials.json", 
-                            venue_email,
-                            contact_details,
-                            st.secrets.get("OPENAI_API_KEY", None)
-                        )
-                        
-                        if result.get("status") == "sent":
-                            st.session_state.emails_sent[name] = True
-                            success_count += 1
-                        else:
-                            st.error(f"Failed to send to {name}: {result.get('message')}")
-                    except Exception as e:
-                        st.error(f"Error sending to {name}: {str(e)}")
-        
-        if success_count > 0:
-            st.success(f"Successfully sent {success_count} inquiries!")
+            if success_count > 0:
+                st.success(f"Successfully sent {success_count} inquiries!")
     
     # Next steps section
     st.markdown("### What Happens Next")

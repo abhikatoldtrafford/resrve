@@ -19,6 +19,12 @@ logger = logging.getLogger('email_system')
 # Initialize OpenAI client at module level
 openai_client = None
 
+# Global constants
+TEST_EMAIL = "abhikatoldtrafford@gmail.com"
+
+# Global EmailSystem instance (singleton)
+EMAIL_CLIENT = None
+
 def init_openai_client(api_key):
     """Initialize the OpenAI client with the provided API key."""
     global openai_client
@@ -26,6 +32,13 @@ def init_openai_client(api_key):
         openai_client = openai.OpenAI(api_key=api_key)
         return True
     return False
+
+def get_email_client(credentials_json):
+    """Singleton pattern for email client to prevent multiple initializations"""
+    global EMAIL_CLIENT
+    if EMAIL_CLIENT is None:
+        EMAIL_CLIENT = EmailSystem(credentials_json)
+    return EMAIL_CLIENT
 
 class EmailSystem:
     def __init__(self, credentials_json: str):
@@ -135,7 +148,8 @@ class EmailSystem:
 class VenueReservationAgent:
     def __init__(self, credentials_json: str, openai_api_key: str = None):
         """Initialize the venue reservation agent with email and AI capabilities."""
-        self.email_system = EmailSystem(credentials_json)
+        # Use the singleton email client
+        self.email_system = get_email_client(credentials_json)
         
         # Initialize the OpenAI client
         global openai_client
@@ -154,6 +168,14 @@ class VenueReservationAgent:
             return self.generate_email_content_template(event_details)
             
         try:
+            # Get the venue name for subject line
+            venue_name = event_details.get('venue_name', 'Selected Venue')
+            event_date = event_details.get('start_date', 'TBD')
+            display_start_time = event_details.get('display_start_time', event_details.get('event_time', ''))
+
+            # Create dynamic subject line with the new format
+            subject = f"Reservation Request: {venue_name} at {event_date} {display_start_time}"
+            
             # Create a prompt that instructs the AI to generate a professional email
             prompt = f"""
             Create a professional, engaging email to inquire about venue reservation for a corporate event. 
@@ -170,7 +192,7 @@ class VenueReservationAgent:
             - Event Name: {event_details.get('event_name', 'Corporate Event')}
             - Type: {event_details.get('event_type', 'N/A')}
             - Date: {event_details.get('start_date', 'TBD')}
-            - Time: {event_details.get('event_time', '')} to {event_details.get('event_endtime', '')}
+            - Time: {event_details.get('display_start_time', '')} to {event_details.get('display_end_time', '')}
             - Location: {', '.join(event_details.get('locations', ['']))}
             - Number of Attendees: {event_details.get('attendees', 'N/A')}
             - Budget: ${event_details.get('venue_budget', 'Flexible')}
@@ -190,7 +212,7 @@ class VenueReservationAgent:
             For the HTML version, use styles to make it attractive but professional. Bold important details, use spacing for readability.
             
             Format your response as a JSON with these fields:
-            {{"subject": "The email subject line", "plain_text": "Plain text version", "html": "HTML version"}}
+            {{"plain_text": "Plain text version", "html": "HTML version"}}
             """
             
             # Generate the email content using OpenAI
@@ -204,7 +226,6 @@ class VenueReservationAgent:
             content = json.loads(response.choices[0].message.content)
             
             # Extract the components
-            subject = content.get("subject", f"Venue Request: {event_details.get('event_name', 'Corporate Event')}")
             plain_text = content.get("plain_text", "")
             html = content.get("html", "")
             
@@ -219,12 +240,12 @@ class VenueReservationAgent:
     def generate_email_content_template(self, event_details: dict) -> tuple:
         """Generate email content using templates when AI is not available."""
         # Extract key information for the subject
-        event_name = event_details.get("event_name", "Corporate Event")
-        start_date = event_details.get("start_date", "")
-        locations = ", ".join(event_details.get("locations", []))
+        venue_name = event_details.get("venue_name", "Selected Venue")
+        event_date = event_details.get("start_date", "")
+        display_start_time = event_details.get("display_start_time", event_details.get("event_time", ""))
         
-        # Create a personalized subject line
-        subject = f"Venue Request from Reserved.ai: {event_name} - {locations} - {start_date}"
+        # Create a personalized subject line with the requested format
+        subject = f"Reservation Request: {venue_name} at {event_date} {display_start_time}"
         
         # Generate the plain text version
         plain_text = self._generate_plain_text(event_details)
@@ -238,16 +259,17 @@ class VenueReservationAgent:
         """Generate plain text email body."""
         # Extract key details
         event_name = event_details.get("event_name", "Corporate Event")
+        venue_name = event_details.get("venue_name", "Selected Venue")
         start_date = event_details.get("start_date", "")
-        event_time = event_details.get("event_time", "")
-        event_endtime = event_details.get("event_endtime", "")
+        display_start_time = event_details.get("display_start_time", event_details.get("event_time", ""))
+        display_end_time = event_details.get("display_end_time", event_details.get("event_endtime", ""))
         locations = ", ".join(event_details.get("locations", []))
         attendees = event_details.get("attendees", "")
         
         # Start building the email body with important details first
         body_parts = [
             f"Dear Sir/Madam,\n\nI am an AI agent emailing on behalf of Reserved.ai, helping to coordinate a venue reservation for our client.\n\n",
-            f"I am inquiring about availability for the following event:\n\n",
+            f"I am inquiring about availability for the following event at {venue_name}:\n\n",
             f"EVENT DETAILS:",
             f"Name: {event_name}",
         ]
@@ -261,10 +283,10 @@ class VenueReservationAgent:
             body_parts.append(f"Date: {start_date}")
         
         # Add time information
-        if event_time and event_endtime:
-            body_parts.append(f"Time: {event_time} to {event_endtime}")
-        elif event_time:
-            body_parts.append(f"Time: {event_time}")
+        if display_start_time and display_end_time:
+            body_parts.append(f"Time: {display_start_time} to {display_end_time}")
+        elif display_start_time:
+            body_parts.append(f"Time: {display_start_time}")
         
         # Add location if provided
         if locations:
@@ -331,9 +353,10 @@ class VenueReservationAgent:
         """Generate HTML formatted email body."""
         # Extract key details
         event_name = event_details.get("event_name", "Corporate Event")
+        venue_name = event_details.get("venue_name", "Selected Venue")
         start_date = event_details.get("start_date", "")
-        event_time = event_details.get("event_time", "")
-        event_endtime = event_details.get("event_endtime", "")
+        display_start_time = event_details.get("display_start_time", event_details.get("event_time", ""))
+        display_end_time = event_details.get("display_end_time", event_details.get("event_endtime", ""))
         locations = ", ".join(event_details.get("locations", []))
         attendees = event_details.get("attendees", "")
         
@@ -355,7 +378,7 @@ class VenueReservationAgent:
             '</head>',
             '<body>',
             '<div class="header">',
-            f'<h2>Venue Inquiry: {event_name}</h2>',
+            f'<h2>Venue Inquiry: {event_name} at {venue_name}</h2>',
             '</div>',
             '<div class="section">',
             '<p>Dear Sir/Madam,</p>',
@@ -375,10 +398,10 @@ class VenueReservationAgent:
         if start_date:
             html_parts.append('<div class="detail-row"><span class="label">Date:</span> <strong>' + start_date + '</strong></div>')
         
-        if event_time and event_endtime:
-            html_parts.append('<div class="detail-row"><span class="label">Time:</span> <strong>' + event_time + ' to ' + event_endtime + '</strong></div>')
-        elif event_time:
-            html_parts.append('<div class="detail-row"><span class="label">Time:</span> <strong>' + event_time + '</strong></div>')
+        if display_start_time and display_end_time:
+            html_parts.append('<div class="detail-row"><span class="label">Time:</span> <strong>' + display_start_time + ' to ' + display_end_time + '</strong></div>')
+        elif display_start_time:
+            html_parts.append('<div class="detail-row"><span class="label">Time:</span> <strong>' + display_start_time + '</strong></div>')
         
         if locations:
             html_parts.append('<div class="detail-row"><span class="label">Location Preference:</span> ' + locations + '</div>')
@@ -515,13 +538,18 @@ class VenueReservationAgent:
 
 
 # Function to send email directly from main application
-def send_venue_request(credentials_path, venue_email, event_details, openai_api_key=None):
+def send_venue_request(credentials_path, venue_email, event_details, openai_api_key=None, use_test_email=True):
     """Helper function to send a venue request email without creating separate instances."""
     try:
+        # Use test email in development/testing mode
+        if use_test_email:
+            venue_email = TEST_EMAIL
+            
         # Initialize OpenAI client if API key is provided
         if openai_api_key:
             init_openai_client(openai_api_key)
             
+        # Use singleton pattern for agent
         agent = VenueReservationAgent(credentials_path, openai_api_key)
         return agent.book_venue(venue_email, event_details)
     except Exception as e:
@@ -537,11 +565,12 @@ def check_venue_response(credentials_path, venue_email, event_name, date=None, o
         if openai_api_key:
             init_openai_client(openai_api_key)
             
+        # Use singleton pattern for agent
         agent = VenueReservationAgent(credentials_path, openai_api_key)
         return agent.check_status(venue_email, event_name, date)
     except Exception as e:
         logger.error(f"Error checking venue response: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Error checking venue response: {str(e)}"}
 
 
 def main():
@@ -559,9 +588,12 @@ def main():
     # Test event details based on the Streamlit form structure
     test_event_details = {
         "event_name": "Team Dinner in NYC",
-        "venue_type": "Resturants",
+        "venue_name": "Test Restaurant",  # Added venue name for subject line
+        "venue_type": "Restaurants",
         "start_date": "03/20/2025",
         "event_type": "Dinner",
+        "display_start_time": "6:00 PM",
+        "display_end_time": "9:00 PM",
         "event_time": "18:00",
         "event_endtime": "21:00",
         "locations": ["New York"],
@@ -577,8 +609,8 @@ def main():
         "atmosphere": "Upscale but not stuffy, modern decor"
     }
     
-    # Test venue email - replace with actual venue email for testing
-    test_venue_email = "abhikatoldtrafford@gmail.com"
+    # Test venue email - use the global test email
+    test_venue_email = TEST_EMAIL
     
     print("\n===== EMAIL SYSTEM TEST =====\n")
     
